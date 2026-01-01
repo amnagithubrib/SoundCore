@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rancid Player</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <!-- SVG Filter for the rough edges effect -->
+  <svg style="display: none">
+    <filter id="rough-edges">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" result="turbulence" />
+      <feDisplacementMap in="SourceGraphic" in2="turbulence" scale="5" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+  </svg>
+  <div id="player-container">
+    <!-- Screen container exactly inside the frame cutout -->
+    <div class="screen-container">
+       <div class="spinner hidden" id="loader"></div>
+      <video 
+        id="backgroundVideo" 
+        src="./videos/low_clip.mp4" 
+        muted 
+        loop 
+        playsinline 
+        webkit-playsinline 
+        preload="auto"
+      ></video>
+    </div>
+
+
+    <!-- Frame image on top -->
+    <img src="images/frame.png" alt="Player frame" class="player-background" />
+
+    <!-- Corner dots -->
+    <img src="images/dots.png" alt="Corner dots" class="corner-dots" />
+
+    <!-- Control buttons -->
+    <div class="controls">
+      <div class="btn">
+        <img id="btn-backward" src="images/backward.png" class="control-btn" />
+        <img id="btn-playpause" src="images/pause.png" class="control-btn"  />
+        <img id="play-icon" src="images/play.png" class="control-btn" style="display: none" />
+        <img id="btn-forward" src="images/forward.png" class="control-btn" />
+      </div>
+      <div class="info-button-container">
+        <img src="images/domer1.png" alt="Domer" class="domer-img" id="doomerToggle" />
+        <a id="btn-info" href="#" target="_blank" class="control-btn">
+          <img src="images/infobutton.png" style="width:100%;" />
+        </a>
+      </div>
+    </div>
+
+    <div class="slider-track">
+      <div class="slider-thumb"></div>
+    </div>
+  </div>
+
+   <!-- Hidden YouTube player -->
+  <div id="yt-player" style="display:none;"></div>
+
+  <audio id="audioPlayer" preload="auto" playsinline webkit-playsinline></audio>
+ 
+<script src="https://www.youtube.com/iframe_api"></script>
+  <script src="js/script.js"></script>
+ 
+
+
+</body>
+
+</html>
