@@ -4,7 +4,6 @@ let currentIndex = -1;
 let isPlaying = false;
 let audioUnlocked = false; 
 
-// Data objects
 let audioFiles = { low: [], medium: [], high: [] };
 let audioFilesDoomer = { low: [], medium: [], high: [] };
 
@@ -18,9 +17,19 @@ const audioPlayer = document.getElementById('audioPlayer');
 const videoPlayer = document.getElementById('backgroundVideo');
 const doomerSwitch = document.getElementById('doomerToggle');
 const infoBtnLink = document.getElementById('btn-info');
-let doomerSpeedMode = "red";
+let doomerSpeedMode = "red"; // Red = Normal, Green = Slow/Doomer
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzfITEDH6ig3Waq4yHIoT12IVnZvPXKpuxUNcHFEnzAqqtMzNkQTiYQ7sBXtgerjCACZw/exec";
+
+// --- SHUFFLE HELPER (Fisher-Yates) ---
+// This ensures the "Random" feel is high-quality
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
 
 // --- YOUTUBE SETUP ---
 let ytPlayer;
@@ -29,49 +38,45 @@ let pendingYTTrack = null;
 
 function onYouTubeIframeAPIReady() {
     ytPlayer = new YT.Player('yt-player', {
-        height: '0', width: '0', videoId: '',
-        playerVars: { 'autoplay': 0, 'controls': 0, 'playsinline': 1, 'enablejsapi': 1 },
+        height: '0',
+        width: '0',
+        videoId: '',
+        playerVars: {
+            autoplay: 0,
+            controls: 0,
+            playsinline: 1,
+            enablejsapi: 1
+        },
         events: {
             onReady: () => {
                 ytReady = true;
                 if (pendingYTTrack) {
-                    playTrackAtIndex(currentIndex);
+                    playTrackAtIndex(null);
                     pendingYTTrack = null;
                 }
             },
             onStateChange: (e) => {
-                if (e.data === YT.PlayerState.ENDED) playTrackAtIndex(currentIndex + 1);
+                if (e.data === YT.PlayerState.ENDED) {
+                    playTrackAtIndex(null);
+                }
             }
         }
     });
 }
 
-// --- iOS CRITICAL FIX: UNLOCKER ---
+// --- iOS MEDIA UNLOCK ---
 function unlockMobileMedia() {
     if (audioUnlocked) return;
-
-    // 1. Video Fix
     videoPlayer.muted = true;
-    videoPlayer.setAttribute('playsinline', 'true');
-    videoPlayer.setAttribute('webkit-playsinline', 'true');
-    videoPlayer.play().then(() => {
-        if (!isPlaying) videoPlayer.pause();
-    }).catch(err => console.log("Video priming failed", err));
-
-    // 2. Audio Fix (Play silent sound to 'warm up' the audio context)
-    audioPlayer.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA=="; 
-    audioPlayer.play().then(() => {
-        audioPlayer.pause();
-        audioUnlocked = true;
-        console.log("iOS Audio Unlocked");
-    }).catch(err => console.log("Audio priming failed", err));
+    videoPlayer.play().then(() => { if (!isPlaying) videoPlayer.pause(); }).catch(() => {});
+    audioPlayer.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==";
+    audioPlayer.play().then(() => { audioPlayer.pause(); audioUnlocked = true; }).catch(() => {});
 }
 
-// Use both click and touchstart for faster response on mobile
 document.addEventListener("touchstart", unlockMobileMedia, { once: true });
 document.addEventListener("click", unlockMobileMedia, { once: true });
 
-// --- DATA FETCHING ---
+// --- DATA FETCH & INITIAL SHUFFLE ---
 async function fetchAndInitialize() {
     try {
         const res = await fetch(API_URL);
@@ -79,187 +84,171 @@ async function fetchAndInitialize() {
 
         const formatSheetData = (rows) => {
             if (!rows) return [];
-            return rows.slice(1)
-                .filter(row => row[2] && row[2].toString().includes('http'))
+            let formatted = rows.slice(1)
+                .filter(row => row[2] && row[2].includes("http"))
                 .map(row => ({
-                    artist: row[0]?.toString().trim() || "Unknown Artist",
-                    title: row[1]?.toString().trim() || "Unknown Song",
-                    file: row[2].toString().trim(),
-                    shopifyUrl: row[3]?.toString().trim() || "#"
+                    artist: row[0] || "Unknown Artist",
+                    title: row[1] || "Unknown Song",
+                    file: row[2],
+                    shopifyUrl: row[3] || "#"
                 }));
+            // RANDOMIZATION: Shuffle every time the app loads
+            return shuffleArray(formatted);
         };
 
         audioFiles.low = formatSheetData(rawData.Low);
         audioFiles.medium = formatSheetData(rawData.Medium);
         audioFiles.high = formatSheetData(rawData.High);
-        audioFilesDoomer = JSON.parse(JSON.stringify(audioFiles));
 
+        audioFilesDoomer = JSON.parse(JSON.stringify(audioFiles));
         updateVideoSource();
     } catch (e) {
-        console.error("Fetch Error:", e);
+        console.error("Fetch Error", e);
     }
 }
 
 // --- CORE PLAYBACK ---
 function getCurrentTrackList() {
-    return doomerSwitch.classList.contains('domer-active') ? audioFilesDoomer[currentLevel] : audioFiles[currentLevel];
+    return audioFiles[currentLevel] || [];
 }
 
-function updateVideoSource() {
-    videoPlayer.muted = true; 
-    videoPlayer.playsInline = true;
-    videoPlayer.src = videoClips[currentLevel];
-    videoPlayer.load();
-    
-    if (isPlaying) {
-        videoPlayer.play().catch(e => console.log("Video wait for interaction"));
-    }
-}
-
-async function playTrackAtIndex(index) {
+async function playTrackAtIndex(index = null) {
     const tracks = getCurrentTrackList();
-    if (!tracks || tracks.length === 0) return;
+    if (!tracks.length) return;
 
-    if (index >= tracks.length) index = 0;
-    if (index < 0) index = tracks.length - 1;
+    // Logic for next song
+    if (index === null) {
+        currentIndex = (currentIndex + 1) % tracks.length;
+    } else {
+        currentIndex = index;
+    }
 
-    const track = tracks[index];
-    currentIndex = index;
-    infoBtnLink.href = track.shopifyUrl || "#";
+    const track = tracks[currentIndex];
+    infoBtnLink.href = track.shopifyUrl;
 
-    // Stop current media
     audioPlayer.pause();
     if (ytReady && ytPlayer?.stopVideo) ytPlayer.stopVideo();
 
-    const isYouTube = track.file.includes("youtube") || track.file.includes("youtu.be");
+    const isYT = track.file.includes("youtube") || track.file.includes("youtu.be");
+    const speed = doomerSpeedMode === "green" ? 0.9 : 1;
 
-    if (isYouTube) {
-        const id = track.file.includes("youtu.be") ? track.file.split("/").pop().split("?")[0] : new URL(track.file).searchParams.get("v");
-        if (ytReady && ytPlayer?.loadVideoById) {
+    if (isYT) {
+        const id = track.file.includes("youtu.be")
+            ? track.file.split("/").pop().split("?")[0]
+            : new URL(track.file).searchParams.get("v");
+
+        if (ytReady) {
             ytPlayer.loadVideoById(id);
             ytPlayer.playVideo();
-            ytPlayer.setPlaybackRate(doomerSpeedMode === "green" ? 0.9 : 1);
+            ytPlayer.setPlaybackRate(speed);
             isPlaying = true;
-            updatePlayPauseUI();
         } else {
             pendingYTTrack = track;
         }
     } else {
         audioPlayer.src = track.file;
         audioPlayer.load();
-        // iOS requires the play() promise to be handled
         try {
             await audioPlayer.play();
-            audioPlayer.playbackRate = doomerSpeedMode === "green" ? 0.9 : 1;
+            audioPlayer.playbackRate = speed;
             isPlaying = true;
-            updatePlayPauseUI();
-        } catch (e) {
-            console.warn("Playback failed. User interaction might be required.", e);
+        } catch {
             isPlaying = false;
-            updatePlayPauseUI();
         }
     }
+
+    updatePlayPauseUI();
     videoPlayer.play().catch(() => {});
 }
 
-async function togglePlay() {
-    // Har toggle par unlock function call karein (safety ke liye)
-    unlockMobileMedia();
+// --- DOOMER TOGGLE LOGIC ---
+doomerSwitch.addEventListener("click", () => {
+    // 1. Toggle the mode
+    doomerSpeedMode = (doomerSpeedMode === "red") ? "green" : "red";
+    
+    // 2. Visual Feedback (Update Image)
+    // Assuming domer1 is red/off and domer2 is green/active
+    if (doomerSpeedMode === "green") {
+        doomerSwitch.src = "images/domer.png"; // Make sure you have this image!
+        doomerSwitch.classList.add("domer-active");
+    } else {
+        doomerSwitch.src = "images/domer1.png";
+        doomerSwitch.classList.remove("domer-active");
+    }
 
+    // 3. Apply speed change immediately to current audio
+    const speed = doomerSpeedMode === "green" ? 0.9 : 1;
+    audioPlayer.playbackRate = speed;
+    if (ytReady && ytPlayer?.setPlaybackRate) {
+        ytPlayer.setPlaybackRate(speed);
+    }
+});
+
+// --- REMAINING CONTROLS ---
+
+async function togglePlay() {
+    unlockMobileMedia();
     const tracks = getCurrentTrackList();
     if (!tracks.length) return;
 
     if (!isPlaying) {
-        if (currentIndex === -1) currentIndex = 0;
-        await playTrackAtIndex(currentIndex);
+        if (currentIndex === -1) {
+            await playTrackAtIndex(null);
+        } else {
+            if (audioPlayer.src && !audioPlayer.src.includes("data:audio")) audioPlayer.play();
+            if (ytReady && ytPlayer?.playVideo) ytPlayer.playVideo();
+            videoPlayer.play().catch(() => {});
+            isPlaying = true;
+        }
     } else {
-        if (ytReady && ytPlayer) ytPlayer.pauseVideo();
         audioPlayer.pause();
+        if (ytReady && ytPlayer?.pauseVideo) ytPlayer.pauseVideo();
         videoPlayer.pause();
         isPlaying = false;
     }
     updatePlayPauseUI();
 }
 
-// --- SLIDER LOGIC ---
 const sliderThumb = document.querySelector(".slider-thumb");
 const sliderTrack = document.querySelector(".slider-track");
 const loader = document.getElementById("loader");
-let isLoading = false;
 
-function showLoader() {
-    loader.classList.remove("hidden");
-    isLoading = true;
+function updateVideoSource() {
+    videoPlayer.src = videoClips[currentLevel];
+    videoPlayer.load();
+    if (isPlaying) videoPlayer.play().catch(() => {});
 }
-
-function hideLoader() {
-    loader.classList.add("hidden");
-    isLoading = false;
-}
-
-videoPlayer.addEventListener("canplay", hideLoader);
 
 sliderTrack.addEventListener("click", async (e) => {
-    unlockMobileMedia(); 
-    if (isLoading) return;
-
-    const trackRect = sliderTrack.getBoundingClientRect();
-    const clickY = e.clientY - trackRect.top;
-    const trackHeight = trackRect.height;
-
-    let newLevel = clickY < trackHeight / 3 ? "low" : (clickY < 2 * trackHeight / 3 ? "medium" : "high");
-
-    if (newLevel === currentLevel) return;
-
-    currentLevel = newLevel;
-    currentIndex = 0;
+    const rect = sliderTrack.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    currentLevel = y < rect.height / 3 ? "low" : y < rect.height * 2 / 3 ? "medium" : "high";
     
-    showLoader();
-    snapThumbToLevel(newLevel);
+    // Shuffle level list again on level change for "fresh experience"
+    shuffleArray(audioFiles[currentLevel]);
+    currentIndex = -1; 
+    
+    snapThumbToLevel(currentLevel);
     updateVideoSource();
-
-    if (isPlaying) await playTrackAtIndex(0);
+    if (isPlaying) await playTrackAtIndex(null);
 });
 
-// --- UI & HELPERS ---
 function updatePlayPauseUI() {
-    const btnPlayPause = document.getElementById("btn-playpause");
-    const playIcon = document.getElementById("play-icon");
-    if (isPlaying) {
-        btnPlayPause.style.display = "none";
-        playIcon.style.display = "inline-block";
-    } else {
-        btnPlayPause.style.display = "inline-block";
-        playIcon.style.display = "none";
-    }
+    document.getElementById("btn-playpause").style.display = isPlaying ? "none" : "inline-block";
+    document.getElementById("play-icon").style.display = isPlaying ? "inline-block" : "none";
 }
 
 function snapThumbToLevel(level) {
-    const trackRect = sliderTrack.getBoundingClientRect();
-    const thumbHeight = sliderThumb.offsetHeight;
-    const segmentHeight = trackRect.height / 3;
-    let posY = 0;
-    if (level === 'low') posY = segmentHeight / 1.5 - thumbHeight / 2;
-    else if (level === 'medium') posY = segmentHeight * 1.5 - thumbHeight / 2;
-    else if (level === 'high') posY = segmentHeight * 2.5 - thumbHeight / 2;
-    sliderThumb.style.top = `${posY}px`;
+    const h = sliderTrack.getBoundingClientRect().height / 3;
+    sliderThumb.style.top = level === "low" ? `${h * 0.5}px` : level === "medium" ? `${h * 1.5}px` : `${h * 2.5}px`;
 }
 
-// --- EVENT LISTENERS ---
 document.getElementById("btn-playpause").addEventListener("click", togglePlay);
 document.getElementById("play-icon").addEventListener("click", togglePlay);
-document.getElementById("btn-forward").addEventListener("click", () => playTrackAtIndex(currentIndex + 1));
-document.getElementById("btn-backward").addEventListener("click", () => playTrackAtIndex(currentIndex - 1));
+document.getElementById("btn-forward").addEventListener("click", () => playTrackAtIndex(null));
+document.getElementById("btn-backward").addEventListener("click", () => playTrackAtIndex(null));
 
-doomerSwitch.addEventListener("click", () => {
-    doomerSpeedMode = doomerSpeedMode === "red" ? "green" : "red";
-    const speed = doomerSpeedMode === "green" ? 0.90 : 1;
-    if (audioPlayer.src) audioPlayer.playbackRate = speed;
-    if (ytReady && ytPlayer?.setPlaybackRate) ytPlayer.setPlaybackRate(speed);
-    doomerSwitch.classList.toggle("domer-active");
-});
-
-audioPlayer.addEventListener("ended", () => playTrackAtIndex(currentIndex + 1));
+audioPlayer.addEventListener("ended", () => playTrackAtIndex(null));
 
 document.addEventListener("DOMContentLoaded", async () => {
     await fetchAndInitialize();
